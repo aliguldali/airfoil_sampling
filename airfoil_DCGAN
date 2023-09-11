@@ -1,0 +1,157 @@
+import torch
+import torch.nn as nn
+import pandas as pd
+import time
+import numpy as np
+import sympy as sy
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import interpolate
+import pandas as pd
+import os
+from torch.utils.data import DataLoader, Dataset, ConcatDataset, random_split
+from scipy import signal
+
+
+
+
+
+def export_results(foldername,epoch_given=None,number=1):
+    y_std = 0.0442995627635039
+    y_mean = 0.016402728
+    coords_export = pd.DataFrame()
+    folder_name = str(foldername)
+    path = "./"+str(folder_name)+"/graphs"
+    os.mkdir(path) 
+    print("a")
+    generator_vec_size = 100
+    generator_features=44
+    discriminator_features = 44
+    class Generator(nn.Module):
+        def __init__(self):
+            super(Generator, self).__init__()
+            self.conv1 = nn.ConvTranspose2d( generator_vec_size, generator_features * 8, 4, 2, 0, bias=False)
+            self.batch1 = nn.BatchNorm2d(generator_features * 8)
+            self.relu1 = nn.LeakyReLU(0.2,True)
+            self.conv2 = nn.ConvTranspose2d(generator_features * 8, generator_features * 4, 4, 2, 1, bias=False)
+            self.batch2 = nn.BatchNorm2d(generator_features * 4)
+            self.relu2 = nn.LeakyReLU(0.2,True)
+            self.conv3 = nn.ConvTranspose2d( generator_features * 4, generator_features * 2, 4, 1, 1, bias=False)
+            self.batch3 = nn.BatchNorm2d(generator_features * 2)
+            self.relu3 = nn.LeakyReLU(0.2,True)
+            self.conv4 = nn.ConvTranspose2d( generator_features * 2, generator_features, 4, bias=False)
+            self.batch4 = nn.BatchNorm2d(generator_features)
+            self.relu4 = nn.LeakyReLU(0.2,True)
+            self.conv5 = nn.ConvTranspose2d( generator_features, 1, 4, 2, 1, bias=False)
+            self.flatten = nn.Flatten(start_dim=1, end_dim=2)
+            self.conv6 = nn.Conv1d(24,4,1)
+            self.tan = nn.Tanh()
+        
+
+        def forward(self, x):
+            x = self.conv1(x)
+            x = self.batch1(x) 
+            x = self.relu1 (x) 
+            mean = 0
+            std = 1
+            noise = torch.tensor(np.random.normal(mean, std, x.size()), dtype=torch.float)
+            x = x + noise
+            x = self.conv2(x) 
+            x = self.batch2(x) 
+            x = self.relu2(x)
+            noise = torch.tensor(np.random.normal(mean, std, x.size()), dtype=torch.float)
+            x = x + noise
+            x = self.conv3(x)
+            x = self.batch3(x) 
+            x = self.relu3(x)
+            noise = torch.tensor(np.random.normal(mean, std, x.size()), dtype=torch.float)
+            x = x + noise
+            x = self.conv4(x) 
+            x = self.batch4(x) 
+            x = self.relu4(x)
+            noise = torch.tensor(np.random.normal(mean, std, x.size()), dtype=torch.float)
+            x = x + noise
+            x = self.conv5(x)
+            x = self.flatten(x)
+            x = self.conv6(x) 
+            x = self.tan(x)
+            x = torch.unsqueeze(x,1)
+            return x
+
+    def get_cosine_distribution():
+        y = np.arange(0,1,1/10)
+        y = np.append(y,1)
+        x = np.cos(y*np.pi/2)
+        x = (x)/2
+        flipped_x = np.flip(x)[1:]+0.5
+        x = (x-0.5)*-1
+        x = np.append(x,flipped_x)
+        return(x)
+
+    class Discriminator(nn.Module):
+            def __init__(self):
+                super(Discriminator, self).__init__()
+                self.conv1 = nn.Conv2d(1, discriminator_features, 3, bias=False)
+                self.leaky1 = nn.LeakyReLU(0.2, inplace=True)
+                self.conv2 = nn.Conv2d(discriminator_features, discriminator_features * 2, 3, 2, 1, bias=False)
+                self.norm1 = nn.BatchNorm2d(discriminator_features * 2)
+                self.leaky2 = nn.LeakyReLU(0.2, inplace=True)
+                self.conv3 = nn.Conv2d(discriminator_features * 2, discriminator_features * 4, 3, 2, 1, bias=False)
+                self.norm2 = nn.BatchNorm2d(discriminator_features * 4)
+                self.leaky3 = nn.LeakyReLU(0.2, inplace=True)
+                self.conv4 = nn.Conv2d(discriminator_features * 4, discriminator_features * 8, 3, 2, 1, bias=False)
+                self.norm3 = nn.BatchNorm2d(discriminator_features * 8)
+                self.leaky4 = nn.LeakyReLU(0.2, inplace=True)
+                self.lin = nn.Linear(1056, 1, bias=False)
+                self.sig = nn.Sigmoid()
+        
+            def forward(self, x):
+
+                x = self.conv1(x)
+                x = self.leaky1(x)
+                x = self.conv2(x)
+                x = self.leaky2(x)
+                x = self.conv3(x)
+                x = self.leaky3(x)
+                x = self.conv4(x)
+                x = self.leaky4(x)
+                x = x.reshape(x.shape[0],-1)
+                x = self.lin(x)
+                x = self.sig(x)
+
+                return x
+    epoch = 0
+    if epoch_given:
+        epoch = epoch_given
+    files = [f for f in os.listdir() if os.path.isfile(f)]
+    all_parts = True
+    while all_parts:
+        for j in range(number):
+            print(j)
+            m = Generator()
+            m.load_state_dict(torch.load(folder_name+"/ad_G"+str(epoch)))
+            fixed_noise = torch.randn(1, 100, 1, 1)
+            y_sam = np.zeros([2,21])
+            with torch.no_grad():
+                y_t = m(fixed_noise)
+                y = torch.squeeze(y_t,0)
+                y = torch.squeeze(y,0)
+                print(y.shape,"shaooe")
+                y = torch.detach(y).numpy()
+                y_sam[0] = y[1,1:22]*y_std+y_mean
+                y_sam[1] = y[2,1:22]*y_std+y_mean
+            y_sam[1] = signal.savgol_filter(y_sam[1], window_length=11, polyorder=5, mode="nearest")
+            y_sam[0] = signal.savgol_filter(y_sam[0], window_length=11, polyorder=5, mode="nearest")
+            print(y.shape)
+            plt.figure(figsize = (5.15,5.15))
+            plt.subplot(111)
+            samples = get_cosine_distribution()
+            for i in range(2):
+                plt.plot(samples, y_sam[i], linestyle = '', marker = 'o')
+                plt.axis('equal')
+            plt.savefig(folder_name+"/graphs/output_"+str(epoch)+str(j)+".jpg")
+            plt.clf()
+        epoch = epoch+100
+        if epoch_given:
+            all_parts = False
+   
